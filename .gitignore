@@ -1,6 +1,11 @@
 .venv/
 __pycache__/
 *.pyc
+*$py.class
 .ipynb_checkpoints/
 .vscode/
 results/
+*.egg-info/
+.eggs/
+dist/
+build/
