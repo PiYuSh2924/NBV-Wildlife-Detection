@@ -1,131 +1,104 @@
-import open3d as o3d
-import numpy as np
 
-from nbv_wildlife.environment import (
-    create_forest,
-    create_ground
-)
+        marker = o3d.geometry.TriangleMesh.create_sphere(
+            radius=CAMERA_MARKER_RADIUS,
+            resolution=16,
+        )
 
-from nbv_wildlife.viewpoints import (
-    create_initial_grid_views
-)
+        marker.translate(
+            np.asarray(pose.position, dtype=float)
+        )
 
+        marker.paint_uniform_color([
+            0.70,
+            0.72,
+            0.76,
+        ])
 
-def create_camera_marker(pose, size=0.5):
-    """
-    Create a small coordinate frame representing
-    the camera/UAV viewpoint.
-    """
+        marker.compute_vertex_normals()
 
-    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
-        size=size,
-        origin=pose.position
-    )
+        geometries.append(marker)
 
-    return frame
+    # --------------------------------------------------------
+    # Coordinate frame
+    # --------------------------------------------------------
 
-
-def create_view_direction(pose, length=2.0):
-    """
-    Draw a line showing the camera viewing direction.
-    """
-
-    start = pose.position
-
-    # Top-down direction
-    direction = np.array(
-        [0.0, 0.0, -length]
-    )
-
-    end = start + direction
-
-    points = o3d.utility.Vector3dVector(
-        [start, end]
-    )
-
-    lines = o3d.utility.Vector2iVector(
-        [[0, 1]]
-    )
-
-    line_set = o3d.geometry.LineSet(
-        points=points,
-        lines=lines
-    )
-
-    return line_set
-
-
-def main():
-
-    print("Creating forest...")
-
-    forest = create_forest(
-        width=30.0,
-        depth=30.0,
-        num_trees=45,
-        seed=42
-    )
-
-    print("Creating 36 initial viewpoints...")
-
-    viewpoints = create_initial_grid_views(
-        width=30.0,
-        depth=30.0,
-        grid_size=6,
-        height=16.0
-    )
-
-    print(f"Number of viewpoints: {len(viewpoints)}")
-
-    # --------------------------------
-    # Visualization objects
-    # --------------------------------
-
-    geometries = []
-
-    # Forest
-    geometries.append(
-        forest.combined_mesh
-    )
-
-    # Ground
-    geometries.append(
-        create_ground(
-            forest.width,
-            forest.depth
+    coordinate_frame = (
+        o3d.geometry.TriangleMesh.create_coordinate_frame(
+            size=4.0,
+            origin=[0.0, 0.0, 0.0],
         )
     )
 
-    # Camera viewpoints
-    for pose in viewpoints:
+    geometries.append(coordinate_frame)
 
-        geometries.append(
-            create_camera_marker(
-                pose
-            )
-        )
+    # --------------------------------------------------------
+    # Open3D visualizer
+    # --------------------------------------------------------
 
-        geometries.append(
-            create_view_direction(
-                pose
-            )
-        )
+    print("\nScene created.")
+    print("Opening visualization window...")
 
-    print()
-    print("Opening Open3D visualization...")
-    print("You should see:")
-    print("  - 30m x 30m forest")
-    print("  - randomized trees")
-    print("  - 36 camera viewpoints")
-    print("  - 6 x 6 grid")
-    print("  - top-down viewing directions")
+    visualizer = o3d.visualization.Visualizer()
 
-    o3d.visualization.draw_geometries(
-        geometries,
-        window_name="NBV Wildlife Detection - V0.1",
-        width=1200,
-        height=800
+    visualizer.create_window(
+        window_name="NBV Wildlife Detection - Baseline",
+        width=1600,
+        height=1000,
     )
+
+    for geometry in geometries:
+        visualizer.add_geometry(
+            geometry,
+            reset_bounding_box=False,
+        )
+
+    # Rendering settings.
+    render_option = visualizer.get_render_option()
+
+    render_option.background_color = np.array([
+        0.12,
+        0.14,
+        0.17,
+    ])
+
+    render_option.mesh_show_back_face = True
+    render_option.light_on = True
+    render_option.line_width = 2.0
+
+    # Initial camera view.
+    view_control = visualizer.get_view_control()
+
+    view_control.set_lookat([
+        0.0,
+        0.0,
+        8.0,
+    ])
+
+    view_control.set_front([
+        1.0,
+        1.0,
+        -0.65,
+    ])
+
+    view_control.set_up([
+        0.0,
+        0.0,
+        1.0,
+    ])
+
+    view_control.set_zoom(0.65)
+
+    print("\nLegend:")
+    print("Colored meshes = Forest trees")
+    print("Grey spheres  = Baseline UAV viewpoints")
+    print("RGB axes      = Coordinate frame")
+    print("\nClose the visualization window to exit.")
+
+    visualizer.run()
+
+    visualizer.destroy_window()
+
+    print("\nBaseline visualization closed.")
 
 
 if __name__ == "__main__":
