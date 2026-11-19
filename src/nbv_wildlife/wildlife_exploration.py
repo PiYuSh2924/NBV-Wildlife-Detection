@@ -87,7 +87,7 @@ class WildlifeAwareLocalNBVPlanner:
         directions[valid] = offsets[valid] / d[valid,None]
         right, up, forward = self.engine.camera_basis(pose.yaw, pose.pitch)
         x, y, z = directions @ right, directions @ up, directions @ forward
-        return valid & (z > 0) & (np.arctan2(np.abs(x),z) <= self.engine.horizontal_fov/2) & (np.arctan2(np.abs(y),z) <= self.engine.vertical_fov/2
+        return valid & (z > 0) & (np.arctan2(np.abs(x),z) <= self.engine.horizontal_fov/2) & (np.arctan2(np.abs(y),z) <= self.engine.vertical_fov/2)
 
     @staticmethod
     def _angle_diff(a,b):
