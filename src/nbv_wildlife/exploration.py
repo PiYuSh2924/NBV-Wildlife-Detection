@@ -138,13 +138,11 @@ class LocalAdaptiveNBVPlanner:
         return score, gain, travel, rotation, revisit
 
     def choose_next(self, state: ExplorationState, current_yaw=0.0):
-        """Select one next camera pose; returns None if no useful candidate."""
+        """Select one next pose, expanding the search if exact gain is low."""
         if len(state.observed_vertices) != len(self.vertices):
             raise ValueError("Planner mesh and exploration-state map differ in size.")
 
-        selected = None
-        all_screened = []
-
+        best_choice = None
         for expansion in range(self.max_expansion + 1):
             step = self.step_size * (2 ** expansion)
             candidates = poses_at_neighbor_positions(
@@ -161,43 +159,46 @@ class LocalAdaptiveNBVPlanner:
                 fov = self._fov_mask(pose)
                 approximate_gain = int(np.sum(fov & ~state.observed_vertices))
                 travel = self._pose_cost(state.current_position, pose)
-                screened.append((approximate_gain, -travel, pose, fov))
+                screened.append((approximate_gain, -travel, pose))
 
             screened.sort(key=lambda item: (item[0], item[1]), reverse=True)
-            all_screened = screened[: self.shortlist_size]
+            shortlist = screened[: self.shortlist_size]
+            if not shortlist or shortlist[0][0] < self.min_novelty:
+                continue
 
-            # If immediate candidates can still add novel FOV vertices,
-            # do not expand farther. Expansion is a fallback for exhausted local area.
-            if screened and screened[0][0] >= self.min_novelty:
-                break
+            best_score = -np.inf
+            expansion_best = None
+            for approximate_gain, _, pose in shortlist:
+                visibility = self.engine.compute_visibility_vector(
+                    pose.position, pose.yaw, pose.pitch
+                ).astype(bool)
+                score, gain, travel, rotation, revisit = self._score(
+                    pose, visibility, state, current_yaw=current_yaw
+                )
+                record = {
+                    "pose": pose,
+                    "visibility": visibility,
+                    "score": score,
+                    "new_vertices": gain,
+                    "travel_distance": travel,
+                    "rotation_cost": rotation,
+                    "revisited_position": revisit,
+                    "expansion_step": step,
+                    "screened_fov_gain": approximate_gain,
+                }
+                if score > best_score:
+                    best_score = score
+                    expansion_best = record
 
-        if not all_screened or all(item[0] == 0 for item in all_screened):
-            return None
+            # Expand only when the shortlisted detailed raycasts show that
+            # the current neighborhood is occluded / already observed.
+            if expansion_best is not None and expansion_best["new_vertices"] >= self.min_novelty:
+                return expansion_best
+            best_choice = expansion_best if best_choice is None else best_choice
 
-        best_score = -np.inf
-        for approximate_gain, _, pose, fov in all_screened:
-            # FOV screen is cheap. Exact occlusion is only tested for shortlisted poses.
-            visibility = self.engine.compute_visibility_vector(
-                pose.position, pose.yaw, pose.pitch
-            ).astype(bool)
-            score, gain, travel, rotation, revisit = self._score(
-                pose, visibility, state, current_yaw=current_yaw
-            )
-            record = {
-                "pose": pose,
-                "visibility": visibility,
-                "score": score,
-                "new_vertices": gain,
-                "travel_distance": travel,
-                "rotation_cost": rotation,
-                "revisited_position": revisit,
-                "expansion_step": step,
-            }
-            if score > best_score:
-                best_score = score
-                selected = record
-
-        return selected
+        # If expansion found no useful visible gain, stop rather than move
+        # to a viewpoint with zero newly visible geometry.
+        return best_choice if best_choice and best_choice["new_vertices"] >= self.min_novelty else None
 
     def step(self, state: ExplorationState, current_yaw=0.0):
         """Plan, select, and update the simulated map for one observation."""
