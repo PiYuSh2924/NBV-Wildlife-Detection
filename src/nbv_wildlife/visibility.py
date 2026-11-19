@@ -227,32 +227,53 @@ class VisibilityEngine:
         camera_position: np.ndarray,
         yaw: float,
         pitch: float,
+        chunk_size: int = 65536,
+        tolerance: float = 1e-4,
     ) -> np.ndarray:
         """
-        Compute w_i for every mesh vertex.
+        Vectorized FOV filtering followed by batched ray casting.
 
-        w_i = 1 -> visible
-        w_i = 0 -> not visible
+        This avoids Python-level per-vertex ray calls. Rays are cast in
+        chunks to limit memory usage for large meshes.
         """
+        vertices = np.asarray(self.mesh.vertices, dtype=np.float32)
+        camera = np.asarray(camera_position, dtype=np.float32)
+        visibility = np.zeros(len(vertices), dtype=np.uint8)
 
-        vertices = np.asarray(
-            self.mesh.vertices
+        right, up, forward = self.camera_basis(yaw, pitch)
+        offsets = vertices - camera
+        distances = np.linalg.norm(offsets, axis=1)
+        valid_distance = distances > 1e-8
+        directions = np.zeros_like(offsets)
+        directions[valid_distance] = offsets[valid_distance] / distances[valid_distance, None]
+
+        x_camera = directions @ right
+        y_camera = directions @ up
+        z_camera = directions @ forward
+
+        in_fov = (
+            valid_distance
+            & (z_camera > 0.0)
+            & (np.arctan2(np.abs(x_camera), z_camera) <= self.horizontal_fov / 2.0)
+            & (np.arctan2(np.abs(y_camera), z_camera) <= self.vertical_fov / 2.0)
         )
+        candidate_indices = np.flatnonzero(in_fov)
+        if candidate_indices.size == 0:
+            return visibility
 
-        visibility = np.zeros(
-            len(vertices),
-            dtype=np.uint8,
-        )
+        for begin in range(0, candidate_indices.size, chunk_size):
+            indices = candidate_indices[begin:begin + chunk_size]
+            ray_origins = np.repeat(camera[None, :], len(indices), axis=0)
+            ray_directions = directions[indices]
+            rays = np.concatenate((ray_origins, ray_directions), axis=1)
 
-        for i, vertex in enumerate(vertices):
-
-            if self.is_visible(
-                camera_position,
-                vertex,
-                yaw,
-                pitch,
-            ):
-                visibility[i] = 1
+            ray_tensor = o3d.core.Tensor(
+                rays, dtype=o3d.core.Dtype.Float32
+            )
+            hits = self.scene.cast_rays(ray_tensor)["t_hit"].numpy()
+            # A target is visible if no hit occurs before its surface.
+            visible = (~np.isfinite(hits)) | (hits >= distances[indices] - tolerance)
+            visibility[indices[visible]] = 1
 
         return visibility
 
